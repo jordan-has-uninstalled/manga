@@ -139,19 +139,18 @@ function initReader() {
   }
 
   function goToPreviousChapter() {
-    const previousChapterLink = getPreviousChapterLink();
-    if (!previousChapterLink) return;
+  const previousChapterLink = getPreviousChapterLink();
+  if (!previousChapterLink) return;
 
-    if (isFullscreenReader()) {
-      sessionStorage.setItem("readerFullscreen", "true");
-    } else {
-      sessionStorage.removeItem("readerFullscreen");
-    }
-
-    const url = new URL(previousChapterLink.href, window.location.href);
-    url.searchParams.set("page", "last");
-    window.location.href = url.toString();
+  if (isFullscreenReader()) {
+    sessionStorage.setItem("readerFullscreen", "true");
+  } else {
+    sessionStorage.removeItem("readerFullscreen");
   }
+
+  sessionStorage.setItem("readerStartPage", "last");
+  window.location.href = previousChapterLink.href;
+}
 
   function preloadNextChapter() {
     const nextChapterLink = getNextChapterLink();
@@ -324,12 +323,15 @@ function initReader() {
   });
 
   function getInitialPage() {
-    const params = new URLSearchParams(window.location.search);
-    const pageParam = params.get("page");
+    const storedStartPage = sessionStorage.getItem("readerStartPage");
 
-    if (pageParam === "last") {
+    if (storedStartPage === "last") {
+      sessionStorage.removeItem("readerStartPage");
       return pageCount;
     }
+
+    const params = new URLSearchParams(window.location.search);
+    const pageParam = params.get("page");
 
     const numericPage = parseInt(pageParam || "", 10);
     if (!Number.isNaN(numericPage) && numericPage >= 1 && numericPage <= pageCount) {
@@ -337,7 +339,7 @@ function initReader() {
     }
 
     return 1;
-  }
+}
 
   updateControls();
 
