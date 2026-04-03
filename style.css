@@ -171,3 +171,29 @@ body.reader-fullscreen .reader-page img {
   margin: 0 auto;
   background: #000;
 }
+
+.reader-loader {
+  width: min(700px, 90%);
+  margin: 1rem auto;
+  text-align: center;
+}
+
+.reader-loader-text {
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.reader-loader-bar {
+  width: 100%;
+  height: 12px;
+  border: 1px solid var(--border);
+  background: var(--box-bg);
+  overflow: hidden;
+}
+
+.reader-loader-fill {
+  width: 0%;
+  height: 100%;
+  background: var(--text);
+  transition: width 0.2s ease;
+}

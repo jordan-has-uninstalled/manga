@@ -38,6 +38,38 @@ function initReader() {
   let pages = [];
   let currentPage = 0;
 
+  const loader = document.createElement("div");
+  loader.className = "reader-loader";
+  loader.innerHTML = `
+    <div class="reader-loader-text" id="readerLoaderText">loading pages...</div>
+    <div class="reader-loader-bar">
+      <div class="reader-loader-fill" id="readerLoaderFill"></div>
+    </div>
+  `;
+  reader.parentNode.insertBefore(loader, reader);
+
+  const loaderText = document.getElementById("readerLoaderText");
+  const loaderFill = document.getElementById("readerLoaderFill");
+
+  function showLoader() {
+    loader.style.display = "block";
+  }
+
+  function hideLoader() {
+    loader.style.display = "none";
+  }
+
+  function updateLoader(current, total) {
+    if (!total) return;
+    const percent = Math.round((current / total) * 100);
+    if (loaderText) {
+      loaderText.textContent = `loading pages... ${current}/${total}`;
+    }
+    if (loaderFill) {
+      loaderFill.style.width = `${percent}%`;
+    }
+  }
+
   function updateControls() {
     if (pageIndicator) {
       pageIndicator.textContent = `page ${currentPage + 1} / ${pages.length}`;
@@ -62,7 +94,6 @@ function initReader() {
 
   function showPage(index) {
     if (!pages.length) return;
-
     currentPage = Math.max(0, Math.min(index, pages.length - 1));
     applyPageVisibility();
     updateControls();
@@ -79,6 +110,16 @@ function initReader() {
     if (nextChapterLink) {
       window.location.href = nextChapterLink.href;
     }
+  }
+
+  function preloadNextChapter() {
+    const nextChapterLink = getNextChapterLink();
+    if (!nextChapterLink) return;
+
+    const link = document.createElement("link");
+    link.rel = "prefetch";
+    link.href = nextChapterLink.href;
+    document.head.appendChild(link);
   }
 
   function imageExists(src) {
@@ -105,15 +146,37 @@ function initReader() {
     return null;
   }
 
-  async function loadAutoReader() {
-    if (!reader.classList.contains("auto-reader")) {
-      pages = Array.from(reader.querySelectorAll(".reader-page"));
-      showPage(0);
-      return;
+  function createPage(src, pageNumber) {
+    const pageDiv = document.createElement("div");
+    pageDiv.className = "reader-page";
+
+    const img = document.createElement("img");
+    img.src = src;
+    img.alt = `page ${pageNumber}`;
+    img.loading = pageNumber <= 2 ? "eager" : "lazy";
+    img.decoding = "async";
+    img.draggable = false;
+
+    pageDiv.appendChild(img);
+    reader.appendChild(pageDiv);
+  }
+
+  async function loadUsingPageCount(base, pageCount) {
+    showLoader();
+
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+      const src = await findImageSrc(base, pageNumber);
+      if (!src) continue;
+
+      createPage(src, pageNumber);
+      updateLoader(pageNumber, pageCount);
     }
 
-    const base = reader.dataset.imageBase;
-    if (!base) return;
+    hideLoader();
+  }
+
+  async function loadByScanning(base) {
+    showLoader();
 
     let pageNumber = 1;
 
@@ -121,23 +184,37 @@ function initReader() {
       const src = await findImageSrc(base, pageNumber);
       if (!src) break;
 
-      const pageDiv = document.createElement("div");
-      pageDiv.className = "reader-page";
-
-      const img = document.createElement("img");
-      img.src = src;
-      img.alt = `page ${pageNumber}`;
-      img.loading = "eager";
-      img.draggable = false;
-
-      pageDiv.appendChild(img);
-      reader.appendChild(pageDiv);
+      createPage(src, pageNumber);
+      updateLoader(pageNumber, pageNumber + 1);
 
       pageNumber++;
     }
 
+    hideLoader();
+  }
+
+  async function loadAutoReader() {
+    if (!reader.classList.contains("auto-reader")) {
+      pages = Array.from(reader.querySelectorAll(".reader-page"));
+      showPage(0);
+      preloadNextChapter();
+      return;
+    }
+
+    const base = reader.dataset.imageBase;
+    const pageCount = parseInt(reader.dataset.pageCount || "0", 10);
+
+    if (!base) return;
+
+    if (pageCount > 0) {
+      await loadUsingPageCount(base, pageCount);
+    } else {
+      await loadByScanning(base);
+    }
+
     pages = Array.from(reader.querySelectorAll(".reader-page"));
     showPage(0);
+    preloadNextChapter();
   }
 
   function updateFullscreenButton() {
@@ -145,12 +222,6 @@ function initReader() {
     fullscreenBtn.textContent = document.body.classList.contains("reader-fullscreen")
       ? "exit fullscreen"
       : "fullscreen";
-  }
-
-  function enterFullscreenReader() {
-    document.body.classList.add("reader-fullscreen");
-    applyPageVisibility();
-    updateFullscreenButton();
   }
 
   function exitFullscreenReader() {
@@ -170,6 +241,7 @@ function initReader() {
   }
 
   if (nextBtn) {
+    prevBtn?.blur();
     nextBtn.addEventListener("click", () => {
       if (currentPage < pages.length - 1) {
         showPage(currentPage + 1);
