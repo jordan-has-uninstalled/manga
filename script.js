@@ -77,9 +77,19 @@ function initReader() {
     pageSources[i] = base + filename;
   }
 
+  function isFullscreenReader() {
+    return document.body.classList.contains("reader-fullscreen");
+  }
+
   function showLoader(text = "loading page...", percent = null) {
+    if (isFullscreenReader()) return;
+
     loader.style.display = "block";
-    if (loaderText) loaderText.textContent = text;
+
+    if (loaderText) {
+      loaderText.textContent = text;
+    }
+
     if (loaderFill) {
       loaderFill.style.width = percent !== null ? `${percent}%` : "0%";
     }
@@ -142,7 +152,9 @@ function initReader() {
   }
 
   function preloadImage(pageNumber) {
-    if (pageNumber < 1 || pageNumber > pageCount) return Promise.resolve(null);
+    if (pageNumber < 1 || pageNumber > pageCount) {
+      return Promise.resolve(null);
+    }
 
     if (pageCache.has(pageNumber)) {
       return pageCache.get(pageNumber).promise;
@@ -184,23 +196,34 @@ function initReader() {
     currentPage = pageNumber;
     updateControls();
 
-    showLoader(
-      `loading page ${pageNumber}...`,
-      Math.round((pageNumber / pageCount) * 100)
-    );
+    if (!isFullscreenReader()) {
+      showLoader(
+        `loading page ${pageNumber}...`,
+        Math.round((pageNumber / pageCount) * 100)
+      );
+    }
 
     try {
       const img = await preloadImage(pageNumber);
+
+      if (!img) return;
+
       mainImg.src = img.src;
       mainImg.alt = `page ${pageNumber}`;
-      hideLoader();
+
+      if (!isFullscreenReader()) {
+        hideLoader();
+      }
+
       preloadNearbyPages(pageNumber);
     } catch (error) {
-      if (loaderText) {
-        loaderText.textContent = `could not load page ${pageNumber}`;
-      }
-      if (loaderFill) {
-        loaderFill.style.width = "100%";
+      if (!isFullscreenReader()) {
+        if (loaderText) {
+          loaderText.textContent = `could not load page ${pageNumber}`;
+        }
+        if (loaderFill) {
+          loaderFill.style.width = "100%";
+        }
       }
     }
 
@@ -226,9 +249,15 @@ function initReader() {
   function updateFullscreenButton() {
     if (!fullscreenBtn) return;
 
-    fullscreenBtn.textContent = document.body.classList.contains("reader-fullscreen")
+    fullscreenBtn.textContent = isFullscreenReader()
       ? "exit fullscreen"
       : "fullscreen";
+  }
+
+  function enterFullscreenReader() {
+    document.body.classList.add("reader-fullscreen");
+    hideLoader();
+    updateFullscreenButton();
   }
 
   function exitFullscreenReader() {
@@ -237,8 +266,11 @@ function initReader() {
   }
 
   function toggleFullscreenReader() {
-    document.body.classList.toggle("reader-fullscreen");
-    updateFullscreenButton();
+    if (isFullscreenReader()) {
+      exitFullscreenReader();
+    } else {
+      enterFullscreenReader();
+    }
   }
 
   if (prevBtn) {
