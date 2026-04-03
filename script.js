@@ -124,9 +124,11 @@ function initReader() {
 
   function goToPreviousChapter() {
     const previousChapterLink = getPreviousChapterLink();
-    if (previousChapterLink) {
-      window.location.href = previousChapterLink.href;
-    }
+    if (!previousChapterLink) return;
+
+    const url = new URL(previousChapterLink.href, window.location.href);
+    url.searchParams.set("page", "last");
+    window.location.href = url.toString();
   }
 
   function preloadNextChapter() {
@@ -275,8 +277,24 @@ function initReader() {
     }
   });
 
+  function getInitialPage() {
+    const params = new URLSearchParams(window.location.search);
+    const pageParam = params.get("page");
+
+    if (pageParam === "last") {
+      return pageCount;
+    }
+
+    const numericPage = parseInt(pageParam || "", 10);
+    if (!Number.isNaN(numericPage) && numericPage >= 1 && numericPage <= pageCount) {
+      return numericPage;
+    }
+
+    return 1;
+  }
+
   updateControls();
-  showPage(1);
+  showPage(getInitialPage());
   preloadNextChapter();
 }
 
