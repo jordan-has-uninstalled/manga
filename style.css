@@ -109,6 +109,10 @@ a {
   background: #000;
 }
 
+.reader-page.active {
+  display: block;
+}
+
 .reader-page img {
   display: block;
   width: auto;
