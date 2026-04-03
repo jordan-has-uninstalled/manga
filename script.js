@@ -52,6 +52,8 @@ function initReader() {
   let currentPageCount = 0;
   let currentChapterData = null;
   let isTransitioningChapter = false;
+  let isSwitchingPage = false;
+  let navToken = 0;
 
   const chapterImageCache = new Map();
   const chapterCountCache = new Map();
@@ -111,17 +113,11 @@ function initReader() {
           : `chapter ${currentChapter}`;
     }
 
-    if (prevBtn) {
-      prevBtn.disabled = isTransitioningChapter;
-    }
+    const disabled = isTransitioningChapter || isSwitchingPage;
 
-    if (nextBtn) {
-      nextBtn.disabled = isTransitioningChapter;
-    }
-
-    if (fullscreenBtn) {
-      fullscreenBtn.disabled = isTransitioningChapter;
-    }
+    if (prevBtn) prevBtn.disabled = disabled;
+    if (nextBtn) nextBtn.disabled = disabled;
+    if (fullscreenBtn) fullscreenBtn.disabled = isTransitioningChapter;
   }
 
   function hasPreviousChapter(chapterNumber = currentChapter) {
@@ -135,12 +131,7 @@ function initReader() {
   function getChapterNumberFromUrl() {
     const params = new URLSearchParams(window.location.search);
     const chapterParam = parseInt(params.get("chapter") || "1", 10);
-
-    if (chapters[chapterParam]) {
-      return chapterParam;
-    }
-
-    return 1;
+    return chapters[chapterParam] ? chapterParam : 1;
   }
 
   function getPageFromUrl() {
@@ -174,7 +165,6 @@ function initReader() {
 
   function updateUrl(chapterNumber, page = null, replace = false) {
     const url = buildChapterUrl(chapterNumber, page);
-
     if (replace) {
       history.replaceState({}, "", url);
     } else {
@@ -250,12 +240,7 @@ function initReader() {
   }
 
   function preloadNearbyPages(chapterNumber, centerPage) {
-    const targets = [
-      centerPage + 1,
-      centerPage + 2,
-      centerPage - 1,
-      centerPage + 3
-    ];
+    const targets = [centerPage + 1, centerPage + 2, centerPage - 1, centerPage + 3];
 
     for (const pageNumber of targets) {
       if (pageNumber >= 1 && pageNumber <= currentPageCount) {
@@ -275,11 +260,13 @@ function initReader() {
   }
 
   async function showPage(pageNumber, updateHistory = true) {
-    if (!currentChapterData || currentPageCount <= 0) return;
+    if (!currentChapterData || currentPageCount <= 0 || isTransitioningChapter) return;
 
     if (pageNumber < 1) pageNumber = 1;
     if (pageNumber > currentPageCount) pageNumber = currentPageCount;
 
+    const token = ++navToken;
+    isSwitchingPage = true;
     currentPage = pageNumber;
     updateControls();
 
@@ -293,7 +280,7 @@ function initReader() {
     try {
       const img = await preloadImage(currentChapter, pageNumber);
 
-      if (!img) return;
+      if (!img || token !== navToken) return;
 
       mainImg.src = img.src;
       mainImg.alt = `${currentChapterData.title} page ${pageNumber}`;
@@ -309,86 +296,96 @@ function initReader() {
       preloadNearbyPages(currentChapter, pageNumber);
       preloadAdjacentChapterFirstPages();
     } catch (error) {
+      if (token !== navToken) return;
+
       if (!isFullscreenReader()) {
-        if (loaderText) {
-          loaderText.textContent = `could not load page ${pageNumber}`;
-        }
-        if (loaderFill) {
-          loaderFill.style.width = "100%";
-        }
+        if (loaderText) loaderText.textContent = `could not load page ${pageNumber}`;
+        if (loaderFill) loaderFill.style.width = "100%";
+      }
+    } finally {
+      if (token === navToken) {
+        isSwitchingPage = false;
+        updateControls();
       }
     }
-
-    updateControls();
   }
 
   async function loadChapter(chapterNumber, startPage = 1, pushHistory = true) {
     if (!chapters[chapterNumber] || isTransitioningChapter) return;
 
+    const token = ++navToken;
     isTransitioningChapter = true;
+    isSwitchingPage = false;
     updateControls();
 
     if (!isFullscreenReader()) {
       showLoader(`loading chapter ${chapterNumber}...`, 15);
     }
 
-    currentChapter = chapterNumber;
-    currentChapterData = chapters[chapterNumber];
+    try {
+      const chapterData = chapters[chapterNumber];
+      const detectedPageCount = await detectPageCount(chapterNumber);
 
-    if (chapterTitle) {
-      chapterTitle.textContent = currentChapterData.title;
-    }
+      if (token !== navToken) return;
 
-    document.title = `${series} - ${currentChapterData.title}`;
-
-    const detectedPageCount = await detectPageCount(chapterNumber);
-    currentPageCount = detectedPageCount;
-
-    if (currentPageCount === 0) {
-      if (!isFullscreenReader() && loaderText) {
-        loaderText.textContent = `could not load ${currentChapterData.title}`;
+      if (detectedPageCount === 0) {
+        if (!isFullscreenReader() && loaderText) {
+          loaderText.textContent = `could not load ${chapterData.title}`;
+        }
+        return;
       }
-      isTransitioningChapter = false;
+
+      currentChapter = chapterNumber;
+      currentChapterData = chapterData;
+      currentPageCount = detectedPageCount;
+
+      if (chapterTitle) {
+        chapterTitle.textContent = currentChapterData.title;
+      }
+
+      document.title = `${series} - ${currentChapterData.title}`;
+
+      let targetPage = startPage;
+
+      if (targetPage === "last") {
+        targetPage = currentPageCount;
+      }
+
+      if (typeof targetPage !== "number" || Number.isNaN(targetPage)) {
+        targetPage = 1;
+      }
+
+      if (targetPage < 1) targetPage = 1;
+      if (targetPage > currentPageCount) targetPage = currentPageCount;
+
+      if (pushHistory) {
+        updateUrl(chapterNumber, targetPage, false);
+      } else {
+        updateUrl(chapterNumber, targetPage, true);
+      }
+
       updateControls();
-      return;
+      await showPage(targetPage, false);
+    } finally {
+      if (token === navToken) {
+        isTransitioningChapter = false;
+        updateControls();
+      }
     }
-
-    let targetPage = startPage;
-
-    if (targetPage === "last") {
-      targetPage = currentPageCount;
-    }
-
-    if (typeof targetPage !== "number" || Number.isNaN(targetPage)) {
-      targetPage = 1;
-    }
-
-    if (targetPage < 1) targetPage = 1;
-    if (targetPage > currentPageCount) targetPage = currentPageCount;
-
-    if (pushHistory) {
-      updateUrl(chapterNumber, targetPage, false);
-    } else {
-      updateUrl(chapterNumber, targetPage, true);
-    }
-
-    isTransitioningChapter = false;
-    updateControls();
-    await showPage(targetPage, false);
   }
 
   async function goToNextChapter() {
-    if (!hasNextChapter()) return;
+    if (!hasNextChapter() || isTransitioningChapter) return;
     await loadChapter(currentChapter + 1, 1, true);
   }
 
   async function goToPreviousChapter() {
-    if (!hasPreviousChapter()) return;
+    if (!hasPreviousChapter() || isTransitioningChapter) return;
     await loadChapter(currentChapter - 1, "last", true);
   }
 
   async function goToPreviousPageOrChapter() {
-    if (isTransitioningChapter) return;
+    if (isTransitioningChapter || isSwitchingPage) return;
 
     if (currentPage > 1) {
       await showPage(currentPage - 1, true);
@@ -398,7 +395,7 @@ function initReader() {
   }
 
   async function goToNextPageOrChapter() {
-    if (isTransitioningChapter) return;
+    if (isTransitioningChapter || isSwitchingPage) return;
 
     if (currentPage < currentPageCount) {
       await showPage(currentPage + 1, true);
@@ -409,10 +406,7 @@ function initReader() {
 
   function updateFullscreenButton() {
     if (!fullscreenBtn) return;
-
-    fullscreenBtn.textContent = isFullscreenReader()
-      ? "exit fullscreen"
-      : "fullscreen";
+    fullscreenBtn.textContent = isFullscreenReader() ? "exit fullscreen" : "fullscreen";
   }
 
   function enterFullscreenReader() {
@@ -449,8 +443,23 @@ function initReader() {
   }
 
   if (fullscreenBtn) {
-    fullscreenBtn.addEventListener("click", toggleFullscreenReader);
+    fullscreenBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleFullscreenReader();
+    });
   }
+
+  pageWrap.addEventListener("click", () => {
+    if (isFullscreenReader()) {
+      exitFullscreenReader();
+    }
+  });
+
+  mainImg.addEventListener("click", () => {
+    if (isFullscreenReader()) {
+      exitFullscreenReader();
+    }
+  });
 
   document.addEventListener("keydown", (e) => {
     const tag = document.activeElement?.tagName;
