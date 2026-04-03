@@ -16,12 +16,10 @@ function initTheme() {
 
   themeBtn.addEventListener("click", () => {
     document.body.classList.toggle("dark");
-
     localStorage.setItem(
       "theme",
       document.body.classList.contains("dark") ? "dark" : "light"
     );
-
     updateThemeButton();
   });
 
@@ -36,16 +34,27 @@ function initReader() {
   const nextBtn = document.getElementById("nextPage");
   const pageIndicator = document.getElementById("pageIndicator");
   const fullscreenBtn = document.getElementById("fullscreenToggle");
+  const chapterTitle = document.getElementById("chapterTitle");
 
-  const base = reader.dataset.imageBase;
-  const pageCount = parseInt(reader.dataset.pageCount || "0", 10);
-  const ext = reader.dataset.imageExtension || "jpg";
+  const series = reader.dataset.series || "FILTH-MAN";
 
-  if (!base || pageCount <= 0) return;
+  const chapters = {
+    1: { title: "chapter 1", folder: "ch1", ext: "jpeg" },
+    2: { title: "chapter 2", folder: "ch2", ext: "jpeg" },
+    3: { title: "chapter 3", folder: "ch3", ext: "jpeg" },
+    4: { title: "chapter 4", folder: "ch4", ext: "jpeg" },
+    5: { title: "chapter 5", folder: "ch5", ext: "jpeg" },
+    6: { title: "chapter 6", folder: "ch6", ext: "jpeg" }
+  };
 
+  let currentChapter = 1;
   let currentPage = 1;
-  const pageCache = new Map();
-  const pageSources = [];
+  let currentPageCount = 0;
+  let currentChapterData = null;
+  let isTransitioningChapter = false;
+
+  const chapterImageCache = new Map();
+  const chapterCountCache = new Map();
 
   const loader = document.createElement("div");
   loader.className = "reader-loader";
@@ -72,16 +81,11 @@ function initReader() {
   const loaderText = loader.querySelector("#readerLoaderText");
   const loaderFill = loader.querySelector("#readerLoaderFill");
 
-  for (let i = 1; i <= pageCount; i++) {
-    const filename = `${String(i).padStart(3, "0")}.${ext}`;
-    pageSources[i] = base + filename;
-  }
-
   function isFullscreenReader() {
     return document.body.classList.contains("reader-fullscreen");
   }
 
-  function showLoader(text = "loading page...", percent = null) {
+  function showLoader(text = "loading...", percent = null) {
     if (isFullscreenReader()) return;
 
     loader.style.display = "block";
@@ -101,108 +105,180 @@ function initReader() {
 
   function updateControls() {
     if (pageIndicator) {
-      pageIndicator.textContent = `page ${currentPage} / ${pageCount}`;
+      pageIndicator.textContent =
+        currentPageCount > 0
+          ? `chapter ${currentChapter} • page ${currentPage} / ${currentPageCount}`
+          : `chapter ${currentChapter}`;
     }
 
     if (prevBtn) {
-      prevBtn.disabled = false;
+      prevBtn.disabled = isTransitioningChapter;
     }
 
     if (nextBtn) {
-      nextBtn.disabled = false;
+      nextBtn.disabled = isTransitioningChapter;
+    }
+
+    if (fullscreenBtn) {
+      fullscreenBtn.disabled = isTransitioningChapter;
     }
   }
 
-  function getNextChapterLink() {
-    return Array.from(document.querySelectorAll(".nav a")).find((link) =>
-      link.textContent.toLowerCase().includes("next chapter")
-    );
+  function hasPreviousChapter(chapterNumber = currentChapter) {
+    return Boolean(chapters[chapterNumber - 1]);
   }
 
-  function getPreviousChapterLink() {
-    return Array.from(document.querySelectorAll(".nav a")).find((link) =>
-      link.textContent.toLowerCase().includes("previous chapter")
-    );
+  function hasNextChapter(chapterNumber = currentChapter) {
+    return Boolean(chapters[chapterNumber + 1]);
   }
 
-  function goToNextChapter() {
-    const nextChapterLink = getNextChapterLink();
-    if (!nextChapterLink) return;
+  function getChapterNumberFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const chapterParam = parseInt(params.get("chapter") || "1", 10);
 
-    if (isFullscreenReader()) {
-      sessionStorage.setItem("readerFullscreen", "true");
+    if (chapters[chapterParam]) {
+      return chapterParam;
+    }
+
+    return 1;
+  }
+
+  function getPageFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const pageParam = params.get("page");
+
+    if (pageParam === "last") {
+      return "last";
+    }
+
+    const numericPage = parseInt(pageParam || "", 10);
+    if (!Number.isNaN(numericPage) && numericPage >= 1) {
+      return numericPage;
+    }
+
+    return 1;
+  }
+
+  function buildChapterUrl(chapterNumber, page = null) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("chapter", String(chapterNumber));
+
+    if (page === null) {
+      url.searchParams.delete("page");
     } else {
-      sessionStorage.removeItem("readerFullscreen");
+      url.searchParams.set("page", String(page));
     }
 
-    window.location.href = nextChapterLink.href;
+    return url.toString();
   }
 
-  function goToPreviousChapter() {
-  const previousChapterLink = getPreviousChapterLink();
-  if (!previousChapterLink) return;
+  function updateUrl(chapterNumber, page = null, replace = false) {
+    const url = buildChapterUrl(chapterNumber, page);
 
-  if (isFullscreenReader()) {
-    sessionStorage.setItem("readerFullscreen", "true");
-  } else {
-    sessionStorage.removeItem("readerFullscreen");
+    if (replace) {
+      history.replaceState({}, "", url);
+    } else {
+      history.pushState({}, "", url);
+    }
   }
 
-  sessionStorage.setItem("readerStartPage", "last");
-  window.location.href = previousChapterLink.href;
-}
-
-  function preloadNextChapter() {
-    const nextChapterLink = getNextChapterLink();
-    if (!nextChapterLink) return;
-
-    const link = document.createElement("link");
-    link.rel = "prefetch";
-    link.href = nextChapterLink.href;
-    document.head.appendChild(link);
+  function getChapterCacheKey(chapterNumber) {
+    return `chapter-${chapterNumber}`;
   }
 
-  function preloadImage(pageNumber) {
-    if (pageNumber < 1 || pageNumber > pageCount) {
+  function getImageSrc(chapterNumber, pageNumber) {
+    const chapter = chapters[chapterNumber];
+    return `../../images/manga/${series}/${chapter.folder}/${String(pageNumber).padStart(3, "0")}.${chapter.ext}`;
+  }
+
+  function getChapterImageCache(chapterNumber) {
+    const key = getChapterCacheKey(chapterNumber);
+
+    if (!chapterImageCache.has(key)) {
+      chapterImageCache.set(key, new Map());
+    }
+
+    return chapterImageCache.get(key);
+  }
+
+  function preloadImage(chapterNumber, pageNumber) {
+    if (!chapters[chapterNumber] || pageNumber < 1) {
       return Promise.resolve(null);
     }
 
-    if (pageCache.has(pageNumber)) {
-      return pageCache.get(pageNumber).promise;
+    const imageCache = getChapterImageCache(chapterNumber);
+
+    if (imageCache.has(pageNumber)) {
+      return imageCache.get(pageNumber).promise;
     }
 
-    const src = pageSources[pageNumber];
+    const src = getImageSrc(chapterNumber, pageNumber);
     const img = new Image();
 
     const promise = new Promise((resolve, reject) => {
       img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error(`failed to load page ${pageNumber}`));
+      img.onerror = () => reject(new Error(`failed to load ${src}`));
     });
 
-    pageCache.set(pageNumber, { img, promise, src });
+    imageCache.set(pageNumber, { img, promise, src });
     img.src = src;
 
     return promise;
   }
 
-  function preloadNearbyPages(centerPage) {
+  async function detectPageCount(chapterNumber) {
+    if (chapterCountCache.has(chapterNumber)) {
+      return chapterCountCache.get(chapterNumber);
+    }
+
+    let pageNumber = 1;
+    let foundAny = false;
+
+    while (true) {
+      try {
+        await preloadImage(chapterNumber, pageNumber);
+        foundAny = true;
+        pageNumber += 1;
+      } catch (error) {
+        break;
+      }
+    }
+
+    const count = foundAny ? pageNumber - 1 : 0;
+    chapterCountCache.set(chapterNumber, count);
+    return count;
+  }
+
+  function preloadNearbyPages(chapterNumber, centerPage) {
     const targets = [
       centerPage + 1,
       centerPage + 2,
       centerPage - 1,
-      centerPage + 3,
+      centerPage + 3
     ];
 
     for (const pageNumber of targets) {
-      if (pageNumber >= 1 && pageNumber <= pageCount) {
-        preloadImage(pageNumber).catch(() => {});
+      if (pageNumber >= 1 && pageNumber <= currentPageCount) {
+        preloadImage(chapterNumber, pageNumber).catch(() => {});
       }
     }
   }
 
-  async function showPage(pageNumber) {
+  function preloadAdjacentChapterFirstPages() {
+    if (hasPreviousChapter()) {
+      preloadImage(currentChapter - 1, 1).catch(() => {});
+    }
+
+    if (hasNextChapter()) {
+      preloadImage(currentChapter + 1, 1).catch(() => {});
+    }
+  }
+
+  async function showPage(pageNumber, updateHistory = true) {
+    if (!currentChapterData || currentPageCount <= 0) return;
+
     if (pageNumber < 1) pageNumber = 1;
-    if (pageNumber > pageCount) pageNumber = pageCount;
+    if (pageNumber > currentPageCount) pageNumber = currentPageCount;
 
     currentPage = pageNumber;
     updateControls();
@@ -210,23 +286,28 @@ function initReader() {
     if (!isFullscreenReader()) {
       showLoader(
         `loading page ${pageNumber}...`,
-        Math.round((pageNumber / pageCount) * 100)
+        Math.round((pageNumber / currentPageCount) * 100)
       );
     }
 
     try {
-      const img = await preloadImage(pageNumber);
+      const img = await preloadImage(currentChapter, pageNumber);
 
       if (!img) return;
 
       mainImg.src = img.src;
-      mainImg.alt = `page ${pageNumber}`;
+      mainImg.alt = `${currentChapterData.title} page ${pageNumber}`;
 
       if (!isFullscreenReader()) {
         hideLoader();
       }
 
-      preloadNearbyPages(pageNumber);
+      if (updateHistory) {
+        updateUrl(currentChapter, pageNumber, true);
+      }
+
+      preloadNearbyPages(currentChapter, pageNumber);
+      preloadAdjacentChapterFirstPages();
     } catch (error) {
       if (!isFullscreenReader()) {
         if (loaderText) {
@@ -241,19 +322,88 @@ function initReader() {
     updateControls();
   }
 
-  function goToPreviousPageOrChapter() {
-    if (currentPage > 1) {
-      showPage(currentPage - 1);
+  async function loadChapter(chapterNumber, startPage = 1, pushHistory = true) {
+    if (!chapters[chapterNumber] || isTransitioningChapter) return;
+
+    isTransitioningChapter = true;
+    updateControls();
+
+    if (!isFullscreenReader()) {
+      showLoader(`loading chapter ${chapterNumber}...`, 15);
+    }
+
+    currentChapter = chapterNumber;
+    currentChapterData = chapters[chapterNumber];
+
+    if (chapterTitle) {
+      chapterTitle.textContent = currentChapterData.title;
+    }
+
+    document.title = `${series} - ${currentChapterData.title}`;
+
+    const detectedPageCount = await detectPageCount(chapterNumber);
+    currentPageCount = detectedPageCount;
+
+    if (currentPageCount === 0) {
+      if (!isFullscreenReader() && loaderText) {
+        loaderText.textContent = `could not load ${currentChapterData.title}`;
+      }
+      isTransitioningChapter = false;
+      updateControls();
+      return;
+    }
+
+    let targetPage = startPage;
+
+    if (targetPage === "last") {
+      targetPage = currentPageCount;
+    }
+
+    if (typeof targetPage !== "number" || Number.isNaN(targetPage)) {
+      targetPage = 1;
+    }
+
+    if (targetPage < 1) targetPage = 1;
+    if (targetPage > currentPageCount) targetPage = currentPageCount;
+
+    if (pushHistory) {
+      updateUrl(chapterNumber, targetPage, false);
     } else {
-      goToPreviousChapter();
+      updateUrl(chapterNumber, targetPage, true);
+    }
+
+    isTransitioningChapter = false;
+    updateControls();
+    await showPage(targetPage, false);
+  }
+
+  async function goToNextChapter() {
+    if (!hasNextChapter()) return;
+    await loadChapter(currentChapter + 1, 1, true);
+  }
+
+  async function goToPreviousChapter() {
+    if (!hasPreviousChapter()) return;
+    await loadChapter(currentChapter - 1, "last", true);
+  }
+
+  async function goToPreviousPageOrChapter() {
+    if (isTransitioningChapter) return;
+
+    if (currentPage > 1) {
+      await showPage(currentPage - 1, true);
+    } else {
+      await goToPreviousChapter();
     }
   }
 
-  function goToNextPageOrChapter() {
-    if (currentPage < pageCount) {
-      showPage(currentPage + 1);
+  async function goToNextPageOrChapter() {
+    if (isTransitioningChapter) return;
+
+    if (currentPage < currentPageCount) {
+      await showPage(currentPage + 1, true);
     } else {
-      goToNextChapter();
+      await goToNextChapter();
     }
   }
 
@@ -287,11 +437,15 @@ function initReader() {
   }
 
   if (prevBtn) {
-    prevBtn.addEventListener("click", goToPreviousPageOrChapter);
+    prevBtn.addEventListener("click", () => {
+      goToPreviousPageOrChapter();
+    });
   }
 
   if (nextBtn) {
-    nextBtn.addEventListener("click", goToNextPageOrChapter);
+    nextBtn.addEventListener("click", () => {
+      goToNextPageOrChapter();
+    });
   }
 
   if (fullscreenBtn) {
@@ -322,24 +476,24 @@ function initReader() {
     }
   });
 
-  function getInitialPage() {
-    const storedStartPage = sessionStorage.getItem("readerStartPage");
+  window.addEventListener("popstate", async () => {
+    const chapterFromUrl = getChapterNumberFromUrl();
+    const pageFromUrl = getPageFromUrl();
 
-    if (storedStartPage === "last") {
-      sessionStorage.removeItem("readerStartPage");
-      return pageCount;
+    if (chapterFromUrl !== currentChapter) {
+      await loadChapter(chapterFromUrl, pageFromUrl, false);
+      return;
     }
 
-    const params = new URLSearchParams(window.location.search);
-    const pageParam = params.get("page");
-
-    const numericPage = parseInt(pageParam || "", 10);
-    if (!Number.isNaN(numericPage) && numericPage >= 1 && numericPage <= pageCount) {
-      return numericPage;
+    if (pageFromUrl === "last") {
+      await showPage(currentPageCount, false);
+      return;
     }
 
-    return 1;
-}
+    if (typeof pageFromUrl === "number") {
+      await showPage(pageFromUrl, false);
+    }
+  });
 
   updateControls();
 
@@ -347,8 +501,7 @@ function initReader() {
     enterFullscreenReader();
   }
 
-  showPage(getInitialPage());
-  preloadNextChapter();
+  loadChapter(getChapterNumberFromUrl(), getPageFromUrl(), false);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
