@@ -95,7 +95,7 @@ function initReader() {
     }
 
     if (prevBtn) {
-      prevBtn.disabled = currentPage === 1;
+      prevBtn.disabled = false;
     }
 
     if (nextBtn) {
@@ -109,10 +109,23 @@ function initReader() {
     );
   }
 
+  function getPreviousChapterLink() {
+    return Array.from(document.querySelectorAll(".nav a")).find((link) =>
+      link.textContent.toLowerCase().includes("previous chapter")
+    );
+  }
+
   function goToNextChapter() {
     const nextChapterLink = getNextChapterLink();
     if (nextChapterLink) {
       window.location.href = nextChapterLink.href;
+    }
+  }
+
+  function goToPreviousChapter() {
+    const previousChapterLink = getPreviousChapterLink();
+    if (previousChapterLink) {
+      window.location.href = previousChapterLink.href;
     }
   }
 
@@ -169,7 +182,10 @@ function initReader() {
     currentPage = pageNumber;
     updateControls();
 
-    showLoader(`loading page ${pageNumber}...`, Math.round((pageNumber / pageCount) * 100));
+    showLoader(
+      `loading page ${pageNumber}...`,
+      Math.round((pageNumber / pageCount) * 100)
+    );
 
     try {
       const img = await preloadImage(pageNumber);
@@ -187,6 +203,22 @@ function initReader() {
     }
 
     updateControls();
+  }
+
+  function goToPreviousPageOrChapter() {
+    if (currentPage > 1) {
+      showPage(currentPage - 1);
+    } else {
+      goToPreviousChapter();
+    }
+  }
+
+  function goToNextPageOrChapter() {
+    if (currentPage < pageCount) {
+      showPage(currentPage + 1);
+    } else {
+      goToNextChapter();
+    }
   }
 
   function updateFullscreenButton() {
@@ -208,19 +240,11 @@ function initReader() {
   }
 
   if (prevBtn) {
-    prevBtn.addEventListener("click", () => {
-      showPage(currentPage - 1);
-    });
+    prevBtn.addEventListener("click", goToPreviousPageOrChapter);
   }
 
   if (nextBtn) {
-    nextBtn.addEventListener("click", () => {
-      if (currentPage < pageCount) {
-        showPage(currentPage + 1);
-      } else {
-        goToNextChapter();
-      }
-    });
+    nextBtn.addEventListener("click", goToNextPageOrChapter);
   }
 
   if (fullscreenBtn) {
@@ -241,19 +265,11 @@ function initReader() {
     }
 
     if (e.key === "ArrowLeft") {
-      showPage(currentPage - 1);
+      goToPreviousPageOrChapter();
     } else if (e.key === "ArrowRight") {
-      if (currentPage < pageCount) {
-        showPage(currentPage + 1);
-      } else {
-        goToNextChapter();
-      }
+      goToNextPageOrChapter();
     } else if (e.key === " ") {
-      if (currentPage < pageCount) {
-        showPage(currentPage + 1);
-      } else {
-        goToNextChapter();
-      }
+      goToNextPageOrChapter();
     } else if (e.key === "Escape") {
       exitFullscreenReader();
     }
