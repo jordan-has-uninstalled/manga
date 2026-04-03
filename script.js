@@ -127,14 +127,26 @@ function initReader() {
 
   function goToNextChapter() {
     const nextChapterLink = getNextChapterLink();
-    if (nextChapterLink) {
-      window.location.href = nextChapterLink.href;
+    if (!nextChapterLink) return;
+
+    if (isFullscreenReader()) {
+      sessionStorage.setItem("readerFullscreen", "true");
+    } else {
+      sessionStorage.removeItem("readerFullscreen");
     }
+
+    window.location.href = nextChapterLink.href;
   }
 
   function goToPreviousChapter() {
     const previousChapterLink = getPreviousChapterLink();
     if (!previousChapterLink) return;
+
+    if (isFullscreenReader()) {
+      sessionStorage.setItem("readerFullscreen", "true");
+    } else {
+      sessionStorage.removeItem("readerFullscreen");
+    }
 
     const url = new URL(previousChapterLink.href, window.location.href);
     url.searchParams.set("page", "last");
@@ -256,12 +268,14 @@ function initReader() {
 
   function enterFullscreenReader() {
     document.body.classList.add("reader-fullscreen");
+    sessionStorage.setItem("readerFullscreen", "true");
     hideLoader();
     updateFullscreenButton();
   }
 
   function exitFullscreenReader() {
     document.body.classList.remove("reader-fullscreen");
+    sessionStorage.removeItem("readerFullscreen");
     updateFullscreenButton();
   }
 
@@ -326,6 +340,11 @@ function initReader() {
   }
 
   updateControls();
+
+  if (sessionStorage.getItem("readerFullscreen") === "true") {
+    enterFullscreenReader();
+  }
+
   showPage(getInitialPage());
   preloadNextChapter();
 }
