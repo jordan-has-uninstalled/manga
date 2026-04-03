@@ -1,6 +1,6 @@
 # MANGA/MISC ART GALLERY
 
-A small retro-styled website for reading **FILTH-MAN** online and browsing related artwork.
+A small retro-styled website for reading **FILTH MAN** online and browsing related artwork.
 
 ![lizard-dance-funny-lizard](https://github.com/user-attachments/assets/e1b6bcc0-7c46-43f1-adff-f7bac5f21be0)
 
