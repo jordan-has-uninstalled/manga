@@ -37,73 +37,70 @@ function initReader() {
   const pageIndicator = document.getElementById("pageIndicator");
   const fullscreenBtn = document.getElementById("fullscreenToggle");
 
-  let pages = [];
-  let currentPage = 0;
+  const base = reader.dataset.imageBase;
+  const pageCount = parseInt(reader.dataset.pageCount || "0", 10);
+  const ext = reader.dataset.imageExtension || "jpg";
+
+  if (!base || pageCount <= 0) return;
+
+  let currentPage = 1;
+  const pageCache = new Map();
+  const pageSources = [];
 
   const loader = document.createElement("div");
   loader.className = "reader-loader";
   loader.innerHTML = `
-    <div class="reader-loader-text" id="readerLoaderText">loading pages...</div>
+    <div class="reader-loader-text" id="readerLoaderText">loading page...</div>
     <div class="reader-loader-bar">
       <div class="reader-loader-fill" id="readerLoaderFill"></div>
     </div>
   `;
 
-  reader.parentNode.insertBefore(loader, reader);
+  const pageWrap = document.createElement("div");
+  pageWrap.className = "reader-page active";
+
+  const mainImg = document.createElement("img");
+  mainImg.alt = "manga page";
+  mainImg.draggable = false;
+
+  pageWrap.appendChild(mainImg);
+
+  reader.innerHTML = "";
+  reader.appendChild(loader);
+  reader.appendChild(pageWrap);
 
   const loaderText = loader.querySelector("#readerLoaderText");
   const loaderFill = loader.querySelector("#readerLoaderFill");
 
-  function showLoader() {
+  for (let i = 1; i <= pageCount; i++) {
+    const filename = `${String(i).padStart(3, "0")}.${ext}`;
+    pageSources[i] = base + filename;
+  }
+
+  function showLoader(text = "loading page...", percent = null) {
     loader.style.display = "block";
+    if (loaderText) loaderText.textContent = text;
+    if (loaderFill) {
+      loaderFill.style.width = percent !== null ? `${percent}%` : "0%";
+    }
   }
 
   function hideLoader() {
     loader.style.display = "none";
   }
 
-  function updateLoader(current, total) {
-    if (!total) return;
-
-    const percent = Math.round((current / total) * 100);
-
-    if (loaderText) {
-      loaderText.textContent = `loading pages... ${current}/${total}`;
-    }
-
-    if (loaderFill) {
-      loaderFill.style.width = `${percent}%`;
-    }
-  }
-
   function updateControls() {
     if (pageIndicator) {
-      pageIndicator.textContent = `page ${currentPage + 1} / ${pages.length}`;
+      pageIndicator.textContent = `page ${currentPage} / ${pageCount}`;
     }
 
     if (prevBtn) {
-      prevBtn.disabled = currentPage === 0;
+      prevBtn.disabled = currentPage === 1;
     }
 
     if (nextBtn) {
-      nextBtn.disabled = currentPage === pages.length - 1;
+      nextBtn.disabled = false;
     }
-  }
-
-  function applyPageVisibility() {
-    pages.forEach((page, index) => {
-      const active = index === currentPage;
-      page.style.display = active ? "block" : "none";
-      page.classList.toggle("active", active);
-    });
-  }
-
-  function showPage(index) {
-    if (!pages.length) return;
-
-    currentPage = Math.max(0, Math.min(index, pages.length - 1));
-    applyPageVisibility();
-    updateControls();
   }
 
   function getNextChapterLink() {
@@ -129,40 +126,67 @@ function initReader() {
     document.head.appendChild(link);
   }
 
-  function createPage(src, pageNumber) {
-    const pageDiv = document.createElement("div");
-    pageDiv.className = "reader-page";
+  function preloadImage(pageNumber) {
+    if (pageNumber < 1 || pageNumber > pageCount) return Promise.resolve(null);
 
-    const img = document.createElement("img");
-    img.src = src;
-    img.alt = `page ${pageNumber}`;
-    img.loading = pageNumber === 1 ? "eager" : "lazy";
-    img.decoding = "async";
-    img.draggable = false;
-
-    pageDiv.appendChild(img);
-    reader.appendChild(pageDiv);
-  }
-
-  async function loadUsingPageCount(base, pageCount, ext) {
-    showLoader();
-
-    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
-      const filename = `${String(pageNumber).padStart(3, "0")}.${ext}`;
-      const src = base + filename;
-
-      createPage(src, pageNumber);
-      updateLoader(pageNumber, pageCount);
-
-      if (pageNumber === 1) {
-        pages = Array.from(reader.querySelectorAll(".reader-page"));
-        showPage(0);
-      }
-
-      await new Promise((resolve) => requestAnimationFrame(resolve));
+    if (pageCache.has(pageNumber)) {
+      return pageCache.get(pageNumber).promise;
     }
 
-    hideLoader();
+    const src = pageSources[pageNumber];
+    const img = new Image();
+
+    const promise = new Promise((resolve, reject) => {
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error(`failed to load page ${pageNumber}`));
+    });
+
+    pageCache.set(pageNumber, { img, promise, src });
+    img.src = src;
+
+    return promise;
+  }
+
+  function preloadNearbyPages(centerPage) {
+    const targets = [
+      centerPage + 1,
+      centerPage + 2,
+      centerPage - 1,
+      centerPage + 3,
+    ];
+
+    for (const pageNumber of targets) {
+      if (pageNumber >= 1 && pageNumber <= pageCount) {
+        preloadImage(pageNumber).catch(() => {});
+      }
+    }
+  }
+
+  async function showPage(pageNumber) {
+    if (pageNumber < 1) pageNumber = 1;
+    if (pageNumber > pageCount) pageNumber = pageCount;
+
+    currentPage = pageNumber;
+    updateControls();
+
+    showLoader(`loading page ${pageNumber}...`, Math.round((pageNumber / pageCount) * 100));
+
+    try {
+      const img = await preloadImage(pageNumber);
+      mainImg.src = img.src;
+      mainImg.alt = `page ${pageNumber}`;
+      hideLoader();
+      preloadNearbyPages(pageNumber);
+    } catch (error) {
+      if (loaderText) {
+        loaderText.textContent = `could not load page ${pageNumber}`;
+      }
+      if (loaderFill) {
+        loaderFill.style.width = "100%";
+      }
+    }
+
+    updateControls();
   }
 
   function updateFullscreenButton() {
@@ -175,44 +199,23 @@ function initReader() {
 
   function exitFullscreenReader() {
     document.body.classList.remove("reader-fullscreen");
-    applyPageVisibility();
     updateFullscreenButton();
   }
 
   function toggleFullscreenReader() {
     document.body.classList.toggle("reader-fullscreen");
-    applyPageVisibility();
     updateFullscreenButton();
   }
 
-  async function loadAutoReader() {
-    if (!reader.classList.contains("auto-reader")) {
-      pages = Array.from(reader.querySelectorAll(".reader-page"));
-      showPage(0);
-      preloadNextChapter();
-      return;
-    }
-
-    const base = reader.dataset.imageBase;
-    const pageCount = parseInt(reader.dataset.pageCount || "0", 10);
-    const ext = reader.dataset.imageExtension || "jpg";
-
-    if (!base || pageCount <= 0) return;
-
-    await loadUsingPageCount(base, pageCount, ext);
-
-    pages = Array.from(reader.querySelectorAll(".reader-page"));
-    showPage(0);
-    preloadNextChapter();
-  }
-
   if (prevBtn) {
-    prevBtn.addEventListener("click", () => showPage(currentPage - 1));
+    prevBtn.addEventListener("click", () => {
+      showPage(currentPage - 1);
+    });
   }
 
   if (nextBtn) {
     nextBtn.addEventListener("click", () => {
-      if (currentPage < pages.length - 1) {
+      if (currentPage < pageCount) {
         showPage(currentPage + 1);
       } else {
         goToNextChapter();
@@ -240,13 +243,13 @@ function initReader() {
     if (e.key === "ArrowLeft") {
       showPage(currentPage - 1);
     } else if (e.key === "ArrowRight") {
-      if (currentPage < pages.length - 1) {
+      if (currentPage < pageCount) {
         showPage(currentPage + 1);
       } else {
         goToNextChapter();
       }
     } else if (e.key === " ") {
-      if (currentPage < pages.length - 1) {
+      if (currentPage < pageCount) {
         showPage(currentPage + 1);
       } else {
         goToNextChapter();
@@ -256,7 +259,9 @@ function initReader() {
     }
   });
 
-  loadAutoReader();
+  updateControls();
+  showPage(1);
+  preloadNextChapter();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
