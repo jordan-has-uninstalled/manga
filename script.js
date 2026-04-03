@@ -16,10 +16,12 @@ function initTheme() {
 
   themeBtn.addEventListener("click", () => {
     document.body.classList.toggle("dark");
+
     localStorage.setItem(
       "theme",
       document.body.classList.contains("dark") ? "dark" : "light"
     );
+
     updateThemeButton();
   });
 
@@ -46,10 +48,11 @@ function initReader() {
       <div class="reader-loader-fill" id="readerLoaderFill"></div>
     </div>
   `;
+
   reader.parentNode.insertBefore(loader, reader);
 
-  const loaderText = document.getElementById("readerLoaderText");
-  const loaderFill = document.getElementById("readerLoaderFill");
+  const loaderText = loader.querySelector("#readerLoaderText");
+  const loaderFill = loader.querySelector("#readerLoaderFill");
 
   function showLoader() {
     loader.style.display = "block";
@@ -61,10 +64,13 @@ function initReader() {
 
   function updateLoader(current, total) {
     if (!total) return;
+
     const percent = Math.round((current / total) * 100);
+
     if (loaderText) {
       loaderText.textContent = `loading pages... ${current}/${total}`;
     }
+
     if (loaderFill) {
       loaderFill.style.width = `${percent}%`;
     }
@@ -94,6 +100,7 @@ function initReader() {
 
   function showPage(index) {
     if (!pages.length) return;
+
     currentPage = Math.max(0, Math.min(index, pages.length - 1));
     applyPageVisibility();
     updateControls();
@@ -122,30 +129,6 @@ function initReader() {
     document.head.appendChild(link);
   }
 
-  function imageExists(src) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve(true);
-      img.onerror = () => resolve(false);
-      img.src = src;
-    });
-  }
-
-  async function findImageSrc(base, pageNumber) {
-    const extensions = ["jpg", "JPG", "jpeg", "JPEG", "png", "PNG", "webp", "WEBP"];
-
-    for (const ext of extensions) {
-      const filename = `${String(pageNumber).padStart(3, "0")}.${ext}`;
-      const src = base + filename;
-
-      if (await imageExists(src)) {
-        return src;
-      }
-    }
-
-    return null;
-  }
-
   function createPage(src, pageNumber) {
     const pageDiv = document.createElement("div");
     pageDiv.className = "reader-page";
@@ -153,7 +136,7 @@ function initReader() {
     const img = document.createElement("img");
     img.src = src;
     img.alt = `page ${pageNumber}`;
-    img.loading = pageNumber <= 2 ? "eager" : "lazy";
+    img.loading = pageNumber === 1 ? "eager" : "lazy";
     img.decoding = "async";
     img.draggable = false;
 
@@ -161,64 +144,30 @@ function initReader() {
     reader.appendChild(pageDiv);
   }
 
-  async function loadUsingPageCount(base, pageCount) {
+  async function loadUsingPageCount(base, pageCount, ext) {
     showLoader();
 
     for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
-      const src = await findImageSrc(base, pageNumber);
-      if (!src) continue;
+      const filename = `${String(pageNumber).padStart(3, "0")}.${ext}`;
+      const src = base + filename;
 
       createPage(src, pageNumber);
       updateLoader(pageNumber, pageCount);
+
+      if (pageNumber === 1) {
+        pages = Array.from(reader.querySelectorAll(".reader-page"));
+        showPage(0);
+      }
+
+      await new Promise((resolve) => requestAnimationFrame(resolve));
     }
 
     hideLoader();
-  }
-
-  async function loadByScanning(base) {
-    showLoader();
-
-    let pageNumber = 1;
-
-    while (true) {
-      const src = await findImageSrc(base, pageNumber);
-      if (!src) break;
-
-      createPage(src, pageNumber);
-      updateLoader(pageNumber, pageNumber + 1);
-
-      pageNumber++;
-    }
-
-    hideLoader();
-  }
-
-  async function loadAutoReader() {
-    if (!reader.classList.contains("auto-reader")) {
-      pages = Array.from(reader.querySelectorAll(".reader-page"));
-      showPage(0);
-      preloadNextChapter();
-      return;
-    }
-
-    const base = reader.dataset.imageBase;
-    const pageCount = parseInt(reader.dataset.pageCount || "0", 10);
-
-    if (!base) return;
-
-    if (pageCount > 0) {
-      await loadUsingPageCount(base, pageCount);
-    } else {
-      await loadByScanning(base);
-    }
-
-    pages = Array.from(reader.querySelectorAll(".reader-page"));
-    showPage(0);
-    preloadNextChapter();
   }
 
   function updateFullscreenButton() {
     if (!fullscreenBtn) return;
+
     fullscreenBtn.textContent = document.body.classList.contains("reader-fullscreen")
       ? "exit fullscreen"
       : "fullscreen";
@@ -236,12 +185,32 @@ function initReader() {
     updateFullscreenButton();
   }
 
+  async function loadAutoReader() {
+    if (!reader.classList.contains("auto-reader")) {
+      pages = Array.from(reader.querySelectorAll(".reader-page"));
+      showPage(0);
+      preloadNextChapter();
+      return;
+    }
+
+    const base = reader.dataset.imageBase;
+    const pageCount = parseInt(reader.dataset.pageCount || "0", 10);
+    const ext = reader.dataset.imageExtension || "jpg";
+
+    if (!base || pageCount <= 0) return;
+
+    await loadUsingPageCount(base, pageCount, ext);
+
+    pages = Array.from(reader.querySelectorAll(".reader-page"));
+    showPage(0);
+    preloadNextChapter();
+  }
+
   if (prevBtn) {
     prevBtn.addEventListener("click", () => showPage(currentPage - 1));
   }
 
   if (nextBtn) {
-    prevBtn?.blur();
     nextBtn.addEventListener("click", () => {
       if (currentPage < pages.length - 1) {
         showPage(currentPage + 1);
